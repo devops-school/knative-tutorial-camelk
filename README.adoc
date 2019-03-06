@@ -1,9 +1,9 @@
 = Knative Tutorial camel-k
 
-The repository of camel-k use cases for the bit.ly/knative-tutorial
+The repository of camel-k use cases for the https://bit.ly/knative-tutorial[bit.ly/knative-tutorial]
 
 == Test folder
 
-The src/main/test/*.jav are the test files that can be used to test the routes before deploying them 
+The src/main/test/*.java are the test files that can be used to test the routes before deploying them 
 using `kamel`
 
