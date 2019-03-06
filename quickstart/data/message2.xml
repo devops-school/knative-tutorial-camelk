@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<person user="kamesh">
-  <firstName>Kamesh</firstName>
-  <lastName>Sampath</lastName>
+<cartoon title="The Adventures of Tenali Raman">
+  <productionHouse>Toonz Animation Studios</productionHouse>
+  <genre>wit,comedy</genre>
   <country>IN</country>
-</person>
+</cartoon>

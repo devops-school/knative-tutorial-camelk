@@ -14,59 +14,38 @@ import org.apache.camel.component.aws.s3.S3Constants;
 import org.apache.camel.component.properties.PropertiesComponent;
 import org.apache.camel.processor.idempotent.MemoryIdempotentRepository;
 import org.apache.camel.spi.IdempotentRepository;
-import org.apache.camel.util.FileUtil;
 
 /**
- *
+ * A Camel Java DSL Router
  */
-public class UsMessagesHandler extends RouteBuilder {
+public class CartoonMessagesMover extends RouteBuilder {
 
 	public void configure() {
 
-		PropertiesComponent pc = getContext().getComponent("properties", PropertiesComponent.class);
-
-		//no error handler for this route
-		errorHandler(noErrorHandler());
+		PropertiesComponent pc = (PropertiesComponent) getContext().getComponent("properties");
 
 		S3Component s3Component = getContext().getComponent("aws-s3", S3Component.class);
 		s3Component.getConfiguration().setAmazonS3Client(amazonS3Client(pc));
 
-		/**
-		 * Process data request body the end point
-		 * TODO:
-		 * this needs to be extracted from properties, currently knative endpoint is not mounting the volume
-		 * this will be enabled once camel-k enables volume mounts for knative components
-		 *
-		 */
-		// @formatter:off
-	   from("knative:channel/messages-us")
-			   .log(LoggingLevel.DEBUG,
-					   "Received content ${body}")
-				 .setProperty("userName", xpath("/person/@user", String.class))
-				 .convertBodyTo(byte[].class)
-				 .log(LoggingLevel.DEBUG,"Writing file {{messagesDir}}/${property.userName}.xml")
-				 .to("file://{{messagesDir}}/us?fileName=${property.userName}.xml")
-				 .end();
 
-	    from("file:{{messagesDir}}?noop=true&recursive=true")
-					.log(LoggingLevel.DEBUG,"Processing file ${in.header.CamelFileName}")
-				 .setHeader(S3Constants.CONTENT_LENGTH, simple("${in.header.CamelFileLength}"))
-                .setHeader(S3Constants.KEY, simple("${in.header.CamelFileNameOnly}"))
-                .convertBodyTo(byte[].class)
-                .process(exchange -> {
-                    //Build a valid destination bucket name
-                    String camelFileRelativePath = exchange.getIn().getHeader("CamelFileRelativePath", String.class);
-                    String onlyPath = "us-out";
-                    if (camelFileRelativePath != null) {
-                        log.debug("Camel File Relative Path " + camelFileRelativePath);
-                        onlyPath = FileUtil.onlyPath(camelFileRelativePath);
-                        log.debug("Camel File  onlyPath " + onlyPath);
-                    }
-                    exchange.setProperty("toBucketName", "messages-"+ onlyPath.toLowerCase());
-                })
-								.log("Uploading file ${header.CamelFileName} to bucket: ${property.toBucketName}")
-                .toD("aws-s3://${property.toBucketName}?deleteAfterWrite=false")
-        .end();
+		//no error handler for this route
+		errorHandler(noErrorHandler());
+
+		/**
+		 * Process input file and move it to another bucket
+		 */
+
+		// @formatter:off
+		from("knative:endpoint/s3fileMover")
+				.log("s3 file to processed : ${in.header.fileName}")
+				.idempotentConsumer(simple("${in.header.fileName}"), idmRepo())
+				//filter only *.xml file and move them
+				.filter(header("fileName").endsWith(".xml"))
+						.setHeader(S3Constants.BUCKET_DESTINATION_NAME,constant("top"))
+						.setHeader(S3Constants.KEY,header("fileName"))
+						.setHeader(S3Constants.DESTINATION_KEY,header("fileName"))
+						.toD("aws-s3://data?operation=copyObject")
+				.end();
 		// @formatter:on
 	}
 
@@ -88,31 +67,33 @@ public class UsMessagesHandler extends RouteBuilder {
 				                                      .withCredentials(credentialsProvider).withClientConfiguration(clientConfiguration)
 				                                      .withPathStyleAccessEnabled(true)
 				                                      .withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(s3EndpointUrl,
-						                                      Regions.US_EAST_1.name()));
+						                                      Regions.AP_SOUTH_1.name()));
 
 		return clientBuilder.build();
 	}
 
 	/**
-	 * @param pc
+	 * @param propertiesComponent
 	 * @param key
 	 * @param defaultValue
 	 * @return
 	 */
-	private String property(PropertiesComponent pc, String key, String defaultValue) {
+	private static String property(PropertiesComponent propertiesComponent, String key, String defaultValue) {
 		try {
-			getContext().resolvePropertyPlaceholders(pc.getPropertyPrefix() + key + pc.getPropertySuffix());
 			if (System.getenv().containsKey(key)) {
 				return System.getenv().getOrDefault(key, defaultValue);
+			} else {
+				return propertiesComponent.parseUri(propertiesComponent.getPrefixToken() + key + propertiesComponent.getSuffixToken());
 			}
-		} catch (Exception e) {
-
-		} finally {
+		} catch (IllegalArgumentException e) {
 			return defaultValue;
+		} catch (Exception e) {
+			throw new RuntimeException(e);
 		}
 	}
 
 	IdempotentRepository idmRepo() {
 		return new MemoryIdempotentRepository();
 	}
+
 }

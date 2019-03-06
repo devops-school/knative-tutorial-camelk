@@ -17,7 +17,7 @@ import org.apache.camel.spi.IdempotentRepository;
 /**
  * A Camel Java DSL Router
  */
-public class PersonMessagesRouter extends RouteBuilder {
+public class CartoonMessagesRouter extends RouteBuilder {
 
 	public void configure() {
 
@@ -35,11 +35,15 @@ public class PersonMessagesRouter extends RouteBuilder {
 		 * TODO - this needs to be extracted from properties, currently knative endpoint is not mounting the volume
 		 */
 		// @formatter:off
+		//This should be serverless
 		from("aws-s3://data?deleteAfterRead=false")
 				.streamCaching()
 				.filter(header("CamelAwsS3Key").endsWith(".xml"))
 				.idempotentConsumer(header("CamelAwsS3ETag"), idmRepo())
+				//Level 100
 				.log(LoggingLevel.DEBUG,"Processing File : ${header.CamelAwsS3Key}")
+				// Level 200 log and move
+				//Business Logic - 300
 				.choice()
 				.when(xpath("/person/country = 'US'"))
 				    .log("Sending Body ${body}")

@@ -19,7 +19,7 @@ import org.apache.camel.util.FileUtil;
 /**
  *
  */
-public class OthersMessagesHandler extends RouteBuilder {
+public class ComedyGenreHandler extends RouteBuilder {
 
 	public void configure() {
 
@@ -39,12 +39,13 @@ public class OthersMessagesHandler extends RouteBuilder {
 		 *
 		 */
 		// @formatter:off
-	   from("knative:channel/messages-others")
-			   .log(LoggingLevel.DEBUG,"Received content ${body}")
+	   from("knative:channel/messages-us")
+			   .log(LoggingLevel.DEBUG,
+					   "Received content ${body}")
 				 .setProperty("userName", xpath("/person/@user", String.class))
 				 .convertBodyTo(byte[].class)
 				 .log(LoggingLevel.DEBUG,"Writing file {{messagesDir}}/${property.userName}.xml")
-				 .to("file://{{messagesDir}}/others?fileName=${property.userName}.xml")
+				 .to("file://{{messagesDir}}/us?fileName=${property.userName}.xml")
 				 .end();
 
 	    from("file:{{messagesDir}}?noop=true&recursive=true")
@@ -55,7 +56,7 @@ public class OthersMessagesHandler extends RouteBuilder {
                 .process(exchange -> {
                     //Build a valid destination bucket name
                     String camelFileRelativePath = exchange.getIn().getHeader("CamelFileRelativePath", String.class);
-                    String onlyPath = "others-out";
+                    String onlyPath = "us-out";
                     if (camelFileRelativePath != null) {
                         log.debug("Camel File Relative Path " + camelFileRelativePath);
                         onlyPath = FileUtil.onlyPath(camelFileRelativePath);
@@ -66,7 +67,7 @@ public class OthersMessagesHandler extends RouteBuilder {
 								.log("Uploading file ${header.CamelFileName} to bucket: ${property.toBucketName}")
                 .toD("aws-s3://${property.toBucketName}?deleteAfterWrite=false")
         .end();
-		  // @formatter:on
+		// @formatter:on
 	}
 
 	AmazonS3 amazonS3Client(PropertiesComponent pc) {

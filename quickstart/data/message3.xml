@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<person user="edson">
-  <firstName>Edson</firstName>
-  <lastName>Yanaga</lastName>
-  <country>US</country>
-</person>
+<cartoon title="Peixonauta">
+  <productionHouse>TV PinGuim</productionHouse>
+  <genre>educational</genre>
+  <country>Brazil</country>
+</cartoon>
