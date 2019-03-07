@@ -7,7 +7,6 @@ import com.amazonaws.client.builder.AwsClientBuilder;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import org.apache.camel.LoggingLevel;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.component.aws.s3.S3Component;
 import org.apache.camel.component.aws.s3.S3Constants;
@@ -38,7 +37,7 @@ public class CartoonMessagesMover extends RouteBuilder {
 		// @formatter:off
 		from("knative:endpoint/s3fileMover")
 				.log("s3 file to processed : ${in.header.fileName}")
-				.idempotentConsumer(simple("${in.header.fileName}"), idmRepo())
+				.idempotentConsumer(header("fileName"), idmRepo())
 				//filter only *.xml file and move them
 				.filter(header("fileName").endsWith(".xml"))
 						.setHeader(S3Constants.BUCKET_DESTINATION_NAME,constant("top"))
