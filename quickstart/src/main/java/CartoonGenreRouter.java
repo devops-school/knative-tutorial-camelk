@@ -7,21 +7,21 @@ import com.amazonaws.client.builder.AwsClientBuilder;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import org.apache.camel.LoggingLevel;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.component.aws.s3.S3Component;
+import org.apache.camel.component.aws.s3.S3Constants;
 import org.apache.camel.component.properties.PropertiesComponent;
 import org.apache.camel.processor.idempotent.MemoryIdempotentRepository;
 import org.apache.camel.spi.IdempotentRepository;
 
 /**
- * A Camel Java DSL Router
+ * A Camel Java DSL Router the uses &quot;Content Based Router EIP &quot; to route the messages based on the cartoon genre
  */
-public class CartoonMessagesRouter extends RouteBuilder {
+public class CartoonGenreRouter extends RouteBuilder {
 
 	public void configure() {
 
-		PropertiesComponent pc = (PropertiesComponent) getContext().getComponent("properties");
+		PropertiesComponent pc = getContext().getComponent("properties", PropertiesComponent.class);
 
 		S3Component s3Component = getContext().getComponent("aws-s3", S3Component.class);
 		s3Component.getConfiguration().setAmazonS3Client(amazonS3Client(pc));
@@ -30,39 +30,55 @@ public class CartoonMessagesRouter extends RouteBuilder {
 		//no error handler for this route
 		errorHandler(noErrorHandler());
 
-		/**
-		 * Process data request body the end point
-		 * TODO - this needs to be extracted from properties, currently knative endpoint is not mounting the volume
-		 */
-		// @formatter:off
-		//This should be serverless
-		from("aws-s3://data?deleteAfterRead=false")
-				.streamCaching()
-				.filter(header("CamelAwsS3Key").endsWith(".xml"))
-				.idempotentConsumer(header("CamelAwsS3ETag"), idmRepo())
-				//Level 100
-				.log(LoggingLevel.DEBUG,"Processing File : ${header.CamelAwsS3Key}")
-				// Level 200 log and move
-				//Business Logic - 300
-				.choice()
-				.when(xpath("/person/country = 'US'"))
-				    .log("Sending Body ${body}")
-					  .to("knative:channel/messages-us")
-				.otherwise()
-				    .log("Sending Body ${body}")
-						.to("knative:channel/messages-others")
-				.end();
 
+		// @formatter:off
+		from("knative:endpoint/cartoonGenres")
+				.log("Processing file : ${in.header.fileName}")
+				.idempotentConsumer(header("fileName"), idmRepo())
+				.filter(header("fileName").endsWith(".xml"))
+				.setHeader(S3Constants.KEY,header("fileName"))
+				.pollEnrich()
+					.simple("aws-s3://data?fileName=${in.header.fileName}&deleteAfterRead=false")
+				  .timeout(3000)
+				   .convertBodyTo(String.class)
+						.choice()
+						.when(xpath("/cartoon/genre = 'comedy'"))
+						    .log("Sending to channel 'genre-comedy' Body ${body}")
+							  .to("knative:channel/genre-comedy")
+						.otherwise()
+						    .log("Sending to channel 'genre-others' ${body}")
+								.to("knative:channel/genre-others")
+				.end();
 		// @formatter:on
 	}
 
+
 	AmazonS3 amazonS3Client(PropertiesComponent pc) {
 
-		final String s3EndpointUrl = property(pc, "s3EndpointUrl", "http://minio-server");
+		String s3EndpointUrl = "http://minio-server";
+
+		try {
+			s3EndpointUrl = getContext().resolvePropertyPlaceholders(propertyWithPlaceHolder(pc, "s3EndpointUrl"));
+		} catch (Exception e) {
+			//nothing to do
+		}
+
 		log.info("S3 URL -> " + s3EndpointUrl);
 
-		final String minioAccessKey = property(pc, "minioAccessKey", "demoaccesskey");
-		final String minioSecretKey = property(pc, "minioSecretKey", "demosecretkey");
+		String minioAccessKey = "demoaccesskey";
+
+		try {
+			minioAccessKey = getContext().resolvePropertyPlaceholders(propertyWithPlaceHolder(pc, "minioAccessKey"));
+		} catch (Exception e) {
+			//nothing to do
+		}
+
+		String minioSecretKey = "demosecretkey";
+		try {
+			minioSecretKey = getContext().resolvePropertyPlaceholders(propertyWithPlaceHolder(pc, "minioSecretKey"));
+		} catch (Exception e) {
+			//nothing to do
+		}
 
 		ClientConfiguration clientConfiguration = new ClientConfiguration();
 		clientConfiguration.setSignerOverride("AWSS3V4SignerType");
@@ -79,24 +95,8 @@ public class CartoonMessagesRouter extends RouteBuilder {
 		return clientBuilder.build();
 	}
 
-	/**
-	 * @param propertiesComponent
-	 * @param key
-	 * @param defaultValue
-	 * @return
-	 */
-	private static String property(PropertiesComponent propertiesComponent, String key, String defaultValue) {
-		try {
-			if (System.getenv().containsKey(key)) {
-				return System.getenv().getOrDefault(key, defaultValue);
-			} else {
-				return propertiesComponent.parseUri(propertiesComponent.getPrefixToken() + key + propertiesComponent.getSuffixToken());
-			}
-		} catch (IllegalArgumentException e) {
-			return defaultValue;
-		} catch (Exception e) {
-			throw new RuntimeException(e);
-		}
+	private static String propertyWithPlaceHolder(PropertiesComponent propertiesComponent, String key) {
+		return propertiesComponent.getPrefixToken() + key + propertiesComponent.getSuffixToken();
 	}
 
 	IdempotentRepository idmRepo() {

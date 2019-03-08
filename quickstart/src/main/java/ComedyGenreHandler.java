@@ -12,12 +12,11 @@ import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.component.aws.s3.S3Component;
 import org.apache.camel.component.aws.s3.S3Constants;
 import org.apache.camel.component.properties.PropertiesComponent;
-import org.apache.camel.processor.idempotent.MemoryIdempotentRepository;
-import org.apache.camel.spi.IdempotentRepository;
-import org.apache.camel.util.FileUtil;
+import org.apache.camel.language.XPath;
 
 /**
- *
+ * The Camel route that handles messages from Knative Channel &quot;genre-comedy&quot; and uploads them to the s3 bucket
+ * genre-comedy with file name calculated using message title attribute
  */
 public class ComedyGenreHandler extends RouteBuilder {
 
@@ -31,52 +30,57 @@ public class ComedyGenreHandler extends RouteBuilder {
 		S3Component s3Component = getContext().getComponent("aws-s3", S3Component.class);
 		s3Component.getConfiguration().setAmazonS3Client(amazonS3Client(pc));
 
-		/**
-		 * Process data request body the end point
-		 * TODO:
-		 * this needs to be extracted from properties, currently knative endpoint is not mounting the volume
-		 * this will be enabled once camel-k enables volume mounts for knative components
-		 *
-		 */
-		// @formatter:off
-	   from("knative:channel/messages-us")
-			   .log(LoggingLevel.DEBUG,
-					   "Received content ${body}")
-				 .setProperty("userName", xpath("/person/@user", String.class))
-				 .convertBodyTo(byte[].class)
-				 .log(LoggingLevel.DEBUG,"Writing file {{messagesDir}}/${property.userName}.xml")
-				 .to("file://{{messagesDir}}/us?fileName=${property.userName}.xml")
-				 .end();
 
-	    from("file:{{messagesDir}}?noop=true&recursive=true")
-					.log(LoggingLevel.DEBUG,"Processing file ${in.header.CamelFileName}")
-				 .setHeader(S3Constants.CONTENT_LENGTH, simple("${in.header.CamelFileLength}"))
-                .setHeader(S3Constants.KEY, simple("${in.header.CamelFileNameOnly}"))
-                .convertBodyTo(byte[].class)
-                .process(exchange -> {
-                    //Build a valid destination bucket name
-                    String camelFileRelativePath = exchange.getIn().getHeader("CamelFileRelativePath", String.class);
-                    String onlyPath = "us-out";
-                    if (camelFileRelativePath != null) {
-                        log.debug("Camel File Relative Path " + camelFileRelativePath);
-                        onlyPath = FileUtil.onlyPath(camelFileRelativePath);
-                        log.debug("Camel File  onlyPath " + onlyPath);
-                    }
-                    exchange.setProperty("toBucketName", "messages-"+ onlyPath.toLowerCase());
-                })
-								.log("Uploading file ${header.CamelFileName} to bucket: ${property.toBucketName}")
-                .toD("aws-s3://${property.toBucketName}?deleteAfterWrite=false")
-        .end();
-		// @formatter:on
+		from("knative:channel/genre-comedy")
+				.log(LoggingLevel.INFO,
+						"Received content ${body}")
+				.setHeader(S3Constants.KEY)
+				.method(this, "normalizeHeader")
+				.convertBodyTo(byte[].class)
+				.log("Uploading file ${header.CamelFileName} to bucket: genre-comedy")
+				.toD("aws-s3://genre-comedy?deleteAfterWrite=false")
+				.end();
+	}
+
+	/**
+	 * This method helps in extracting the title attribute from the message, remove all spaces, lower case and append .xml to it
+	 *
+	 * @param title - the evaluated xpath expression value
+	 * @return the normalized title,
+	 */
+	public String normalizeHeader(@XPath(value = "/cartoon/@title") String title) {
+		log.info("Cartoon Title:{}", title);
+		final String normalized = title.replaceAll("\\s+", "").toLowerCase() + ".xml";
+		log.info("Normalized Title:{}", normalized);
+		return normalized;
 	}
 
 	AmazonS3 amazonS3Client(PropertiesComponent pc) {
 
-		final String s3EndpointUrl = property(pc, "s3EndpointUrl", "http://minio-server");
+		String s3EndpointUrl = "http://minio-server";
+
+		try {
+			s3EndpointUrl = getContext().resolvePropertyPlaceholders(propertyWithPlaceHolder(pc, "s3EndpointUrl"));
+		} catch (Exception e) {
+			//nothing to do
+		}
+
 		log.info("S3 URL -> " + s3EndpointUrl);
 
-		final String minioAccessKey = property(pc, "minioAccessKey", "demoaccesskey");
-		final String minioSecretKey = property(pc, "minioSecretKey", "demosecretkey");
+		String minioAccessKey = "demoaccesskey";
+
+		try {
+			minioAccessKey = getContext().resolvePropertyPlaceholders(propertyWithPlaceHolder(pc, "minioAccessKey"));
+		} catch (Exception e) {
+			//nothing to do
+		}
+
+		String minioSecretKey = "demosecretkey";
+		try {
+			minioSecretKey = getContext().resolvePropertyPlaceholders(propertyWithPlaceHolder(pc, "minioSecretKey"));
+		} catch (Exception e) {
+			//nothing to do
+		}
 
 		ClientConfiguration clientConfiguration = new ClientConfiguration();
 		clientConfiguration.setSignerOverride("AWSS3V4SignerType");
@@ -88,31 +92,17 @@ public class ComedyGenreHandler extends RouteBuilder {
 				                                      .withCredentials(credentialsProvider).withClientConfiguration(clientConfiguration)
 				                                      .withPathStyleAccessEnabled(true)
 				                                      .withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(s3EndpointUrl,
-						                                      Regions.US_EAST_1.name()));
+						                                      Regions.AP_SOUTH_1.name()));
 
 		return clientBuilder.build();
 	}
 
 	/**
-	 * @param pc
+	 * @param propertiesComponent
 	 * @param key
-	 * @param defaultValue
 	 * @return
 	 */
-	private String property(PropertiesComponent pc, String key, String defaultValue) {
-		try {
-			getContext().resolvePropertyPlaceholders(pc.getPropertyPrefix() + key + pc.getPropertySuffix());
-			if (System.getenv().containsKey(key)) {
-				return System.getenv().getOrDefault(key, defaultValue);
-			}
-		} catch (Exception e) {
-
-		} finally {
-			return defaultValue;
-		}
-	}
-
-	IdempotentRepository idmRepo() {
-		return new MemoryIdempotentRepository();
+	private static String propertyWithPlaceHolder(PropertiesComponent propertiesComponent, String key) {
+		return propertiesComponent.getPrefixToken() + key + propertiesComponent.getSuffixToken();
 	}
 }

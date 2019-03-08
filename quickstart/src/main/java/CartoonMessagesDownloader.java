@@ -15,7 +15,7 @@ import org.apache.camel.component.aws.s3.S3Constants;
 import org.apache.camel.component.properties.PropertiesComponent;
 
 /**
- * A Camel Java DSL Router
+ * A Camel Java DSL Router that downloads the file from s3 and sends the content as response
  */
 public class CartoonMessagesDownloader extends RouteBuilder {
 
@@ -101,14 +101,8 @@ public class CartoonMessagesDownloader extends RouteBuilder {
 		return clientBuilder.build();
 	}
 
-	/**
-	 * @param propertiesComponent
-	 * @param key
-	 * @return
-	 */
 	private static String propertyWithPlaceHolder(PropertiesComponent propertiesComponent, String key) {
 		return propertiesComponent.getPrefixToken() + key + propertiesComponent.getSuffixToken();
 
 	}
-
 }
